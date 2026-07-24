@@ -146,7 +146,9 @@
                       ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
                       : value === 'grok'
                         ? 'bg-zinc-200 text-zinc-800 dark:bg-zinc-700 dark:text-zinc-100'
-                        : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+                        : value === 'copilot'
+                          ? 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400'
+                          : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
               ]"
             >
               <PlatformIcon :platform="value" size="xs" />
@@ -4217,6 +4219,8 @@ const platformOptions = computed(() => [
   { value: "antigravity", label: "Antigravity" },
   { value: "grok", label: "Grok" },
   { value: "composite", label: "Composite" },
+  { value: "sora", label: "Sora" },
+  { value: "copilot", label: "GitHub Copilot" },
 ]);
 
 const platformFilterOptions = computed(() => [
@@ -4227,6 +4231,8 @@ const platformFilterOptions = computed(() => [
   { value: "antigravity", label: "Antigravity" },
   { value: "grok", label: "Grok" },
   { value: "composite", label: "Composite" },
+  { value: "sora", label: "Sora" },
+  { value: "copilot", label: "GitHub Copilot" },
 ]);
 
 const compositeRoutePlatformOptions = computed(() => [

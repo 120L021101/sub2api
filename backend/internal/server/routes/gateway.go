@@ -350,6 +350,20 @@ func RegisterGatewayRoutes(
 		antigravityV1Beta.POST("/models/*modelAction", h.Gateway.GeminiV1BetaModels)
 	}
 
+	// Copilot 专用路由（强制使用 copilot 平台，OpenAI 兼容格式）
+	copilotV1 := r.Group("/copilot/v1")
+	copilotV1.Use(bodyLimit)
+	copilotV1.Use(clientRequestID)
+	copilotV1.Use(opsErrorLogger)
+	copilotV1.Use(middleware.ForcePlatform(service.PlatformCopilot))
+	copilotV1.Use(gin.HandlerFunc(apiKeyAuth))
+	copilotV1.Use(requireGroupAnthropic)
+	{
+		copilotV1.POST("/chat/completions", h.CopilotGateway.ChatCompletions)
+		copilotV1.GET("/models", h.CopilotGateway.Models)
+		// Anthropic-compatible endpoint — allows Claude Code to use Copilot accounts directly.
+		copilotV1.POST("/messages", h.CopilotGateway.Messages)
+	}
 }
 
 // getGroupPlatform extracts the group platform from the API Key stored in context.

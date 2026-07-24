@@ -176,6 +176,7 @@ func ProvideAccountTestService(
 	claudeTokenProvider *ClaudeTokenProvider,
 	grokTokenProvider *GrokTokenProvider,
 	antigravityGatewayService *AntigravityGatewayService,
+	copilotTokenProvider *CopilotTokenProvider,
 	httpUpstream HTTPUpstream,
 	cfg *config.Config,
 	tlsFPProfileService *TLSFingerprintProfileService,
@@ -187,6 +188,7 @@ func ProvideAccountTestService(
 		claudeTokenProvider,
 		grokTokenProvider,
 		antigravityGatewayService,
+		copilotTokenProvider,
 		httpUpstream,
 		cfg,
 		tlsFPProfileService,
@@ -787,6 +789,11 @@ var ProviderSet = wire.NewSet(
 	ProvideChannelMonitorRunner,
 	NewChannelMonitorRequestTemplateService,
 	ProvideUserPlatformQuotaUsageFlusher,
+
+	// Copilot (GitHub Copilot) services
+	NewCopilotTokenProvider,
+	NewCopilotGatewayService,
+	NewCopilotOAuthService,
 )
 
 // ProvideUserPlatformQuotaUsageFlusher 创建并启动 UserPlatformQuotaUsageFlusher。

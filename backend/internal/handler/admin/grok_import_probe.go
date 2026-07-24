@@ -199,6 +199,7 @@ func ProvideAccountHandler(
 		sessionLimitCache,
 		rpmCache,
 		tokenCacheInvalidator,
+		nil, // copilotGatewayService
 	)
 	handler.grokImportProber = grokQuotaService
 	return handler
