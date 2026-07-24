@@ -20,6 +20,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/copilot"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
@@ -70,6 +71,7 @@ type AccountTestService struct {
 	claudeTokenProvider       *ClaudeTokenProvider
 	grokTokenProvider         *GrokTokenProvider
 	antigravityGatewayService *AntigravityGatewayService
+	copilotTokenProvider      *CopilotTokenProvider
 	httpUpstream              HTTPUpstream
 	cfg                       *config.Config
 	tlsFPProfileService       *TLSFingerprintProfileService
@@ -84,6 +86,7 @@ func NewAccountTestService(
 	claudeTokenProvider *ClaudeTokenProvider,
 	grokTokenProvider *GrokTokenProvider,
 	antigravityGatewayService *AntigravityGatewayService,
+	copilotTokenProvider *CopilotTokenProvider,
 	httpUpstream HTTPUpstream,
 	cfg *config.Config,
 	tlsFPProfileService *TLSFingerprintProfileService,
@@ -94,6 +97,7 @@ func NewAccountTestService(
 		claudeTokenProvider:       claudeTokenProvider,
 		grokTokenProvider:         grokTokenProvider,
 		antigravityGatewayService: antigravityGatewayService,
+		copilotTokenProvider:      copilotTokenProvider,
 		httpUpstream:              httpUpstream,
 		cfg:                       cfg,
 		tlsFPProfileService:       tlsFPProfileService,
@@ -201,6 +205,10 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 
 	if account.Platform == PlatformAntigravity {
 		return s.routeAntigravityTest(c, account, modelID, prompt)
+	}
+
+	if account.Platform == PlatformCopilot {
+		return s.testCopilotAccountConnection(c, account, modelID)
 	}
 
 	return s.testClaudeAccountConnection(c, account, modelID)
@@ -610,6 +618,9 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 
 	// Set common headers
 	req.Header.Set("Content-Type", "application/json")
+	if !isOAuth {
+		applyOpenAICodexProbeHeaders(req.Header)
+	}
 	if credentialAccount.IsOpenAIAgentIdentity() {
 		authHeaders, authErr := buildAgentIdentityAuthenticationHeaders(ctx, s.accountRepo, s.agentIdentityWS, &s.agentIdentityTaskMu, credentialAccount)
 		if authErr != nil {
@@ -711,7 +722,9 @@ func (s *AccountTestService) testGrokAccountConnection(c *gin.Context, account *
 			return s.sendErrorAndEnd(c, "Grok token provider not configured")
 		}
 		var err error
-		authToken, err = s.grokTokenProvider.GetAccessToken(ctx, account)
+		// 手动测试不走生产调度资格门：关闭调度、限流/过载/临时冷却中的账号
+		// 也应能被管理员探测（#4598），与 Codex/OpenAI 测试行为一致。
+		authToken, err = s.grokTokenProvider.GetAccessTokenForManualTest(ctx, account)
 		if err != nil {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to get Grok access token: %s", err.Error()))
 		}
@@ -935,10 +948,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	} else {
 		req.Header.Set("Authorization", "Bearer "+authToken)
 	}
-	req.Header.Set("OpenAI-Beta", "responses=experimental")
-	req.Header.Set("Originator", "codex_cli_rs")
-	req.Header.Set("User-Agent", codexCLIUserAgent)
-	req.Header.Set("Version", codexCLIVersion)
+	applyOpenAICodexProbeHeaders(req.Header)
 	probeSessionID := compactProbeSessionID(account.ID)
 	req.Header.Set("Session_ID", probeSessionID)
 	req.Header.Set("Conversation_ID", probeSessionID)
@@ -1164,6 +1174,148 @@ func (s *AccountTestService) testAntigravityAccountConnection(c *gin.Context, ac
 
 	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
 	return nil
+}
+
+// testCopilotAccountConnection tests a GitHub Copilot account's connection.
+//
+// The test flow:
+//  1. Validate github_token credential exists
+//  2. Exchange GitHub token for a short-lived Copilot API token (validates auth)
+//  3. Send a minimal chat/completions request to verify API access
+//  4. Stream the response back to the client as SSE events
+func (s *AccountTestService) testCopilotAccountConnection(c *gin.Context, account *Account, modelID string) error {
+	ctx := c.Request.Context()
+
+	// Validate github_token credential
+	githubToken := strings.TrimSpace(account.GetCredential("github_token"))
+	if githubToken == "" {
+		return s.sendErrorAndEnd(c, "No GitHub token available in account credentials")
+	}
+
+	// Default test model
+	testModelID := modelID
+	if testModelID == "" {
+		testModelID = copilot.DefaultTestModel
+	}
+
+	// Apply model mapping if configured
+	if account.Type == "apikey" {
+		mapping := account.GetModelMapping()
+		if mapped, ok := mapping[testModelID]; ok && mapped != "" {
+			testModelID = mapped
+		}
+	}
+
+	// Set SSE headers
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Writer.Flush()
+
+	// Send test_start event
+	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
+
+	// Step 1: Exchange token (validates GitHub token + Copilot subscription)
+	s.sendEvent(c, TestEvent{Type: "content", Text: "Exchanging GitHub token for Copilot API token...\n"})
+
+	copilotToken, err := s.copilotTokenProvider.GetAccessToken(ctx, account)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Token exchange failed: %s", err.Error()))
+	}
+
+	s.sendEvent(c, TestEvent{Type: "content", Text: "✓ Token exchange successful\n\n"})
+
+	// Step 2: Determine base URL
+	baseURL := copilot.CopilotAPIBase
+	if customURL := strings.TrimSpace(account.GetCredential("base_url")); customURL != "" {
+		baseURL = strings.TrimRight(customURL, "/")
+	}
+
+	// Step 3: Send a minimal streaming chat/completions request
+	payload := map[string]any{
+		"model": testModelID,
+		"messages": []map[string]string{
+			{"role": "user", "content": "Say 'Hello from Copilot!' in one short sentence."},
+		},
+		"max_tokens": 50,
+		"stream":     true,
+	}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to build test payload: %s", err.Error()))
+	}
+
+	upstreamURL := baseURL + "/chat/completions"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, bytes.NewReader(payloadBytes))
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to build request: %s", err.Error()))
+	}
+
+	// Set Copilot headers
+	req.Header.Set("Authorization", "Bearer "+copilotToken)
+	req.Header.Set("Content-Type", "application/json")
+	for k, vals := range copilot.CopilotHeaders("user", false) {
+		for _, v := range vals {
+			req.Header.Set(k, v)
+		}
+	}
+
+	// Send request
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Copilot API request failed: %s", err.Error()))
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Copilot API returned HTTP %d: %s", resp.StatusCode, string(body)))
+	}
+
+	// Step 4: Process streaming response
+	s.processCopilotStream(c, resp.Body)
+
+	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+	return nil
+}
+
+// processCopilotStream reads SSE events from a Copilot streaming response
+// and forwards content deltas to the client.
+func (s *AccountTestService) processCopilotStream(c *gin.Context, body io.Reader) {
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 64*1024)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := line[6:]
+		if data == "[DONE]" {
+			break
+		}
+
+		// Parse OpenAI-compatible streaming chunk
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					Content string `json:"content"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			continue
+		}
+
+		for _, choice := range chunk.Choices {
+			if choice.Delta.Content != "" {
+				s.sendEvent(c, TestEvent{Type: "content", Text: choice.Delta.Content})
+			}
+		}
+	}
 }
 
 // buildGeminiAPIKeyRequest builds request for Gemini API Key accounts

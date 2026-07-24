@@ -23,6 +23,9 @@ const (
 	PlatformGemini      = "gemini"
 	PlatformAntigravity = "antigravity"
 	PlatformGrok        = "grok"
+	PlatformComposite   = "composite"
+	PlatformSora        = "sora"
+	PlatformCopilot     = "copilot" // GitHub Copilot
 )
 
 // Account type constants

@@ -26,8 +26,8 @@
         <p class="input-hint">{{ t('admin.accounts.notesHint') }}</p>
       </div>
 
-      <!-- API Key fields (only for apikey type) -->
-      <div v-if="account.type === 'apikey'" class="space-y-4">
+      <!-- API Key fields (only for apikey type, except Copilot) -->
+      <div v-if="account.type === 'apikey' && account.platform !== 'copilot'" class="space-y-4">
         <div>
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
@@ -428,6 +428,26 @@
 
       </div>
 
+      <!-- Grok OAuth client-tool prompt cache opt-in -->
+      <div
+        v-if="account.platform === 'grok' && account.type === 'oauth'"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div class="flex items-center justify-between gap-4">
+          <div class="min-w-0">
+            <label class="input-label mb-0">{{ t('admin.accounts.grokClientToolCache.title') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.grokClientToolCache.hint') }}
+            </p>
+          </div>
+          <Toggle
+            v-model="grokClientToolCacheEnabled"
+            data-testid="grok-client-tool-cache-toggle"
+            :aria-label="t('admin.accounts.grokClientToolCache.title')"
+          />
+        </div>
+      </div>
+
       <!-- Grok OAuth Custom Upstream URL (仅改写转发端点，OAuth 授权/刷新不受影响) -->
       <div
         v-if="account.platform === 'grok' && account.type === 'oauth'"
@@ -647,6 +667,98 @@
       </div>
 
       <!-- Upstream fields (only for upstream type) -->
+
+      <!-- Copilot credential fields (apikey type, copilot platform) -->
+      <div v-if="account.type === 'apikey' && account.platform === 'copilot'" class="space-y-4">
+        <div>
+          <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
+          <input
+            v-model="editBaseUrl"
+            type="text"
+            class="input"
+            placeholder="https://api.individual.githubcopilot.com"
+          />
+          <p class="input-hint">{{ t('admin.accounts.copilot.baseUrlHint') }}</p>
+        </div>
+        <div>
+          <label class="input-label">{{ t('admin.accounts.copilot.githubToken') }}</label>
+          <input
+            v-model="editGithubToken"
+            type="password"
+            class="input font-mono"
+            placeholder="ghp_xxxxxxxxxxxx / github_pat_xxxxxxxxxxxx"
+          />
+          <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
+        </div>
+      </div>
+
+      <!-- Copilot model mapping (optional override of built-in dash→dot conversion) -->
+      <div v-if="account.platform === 'copilot'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <label class="input-label">{{ t('admin.accounts.copilot.modelMapping') }}</label>
+
+        <div class="mb-3 rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
+          <p class="text-xs text-blue-700 dark:text-blue-400">
+            {{ t('admin.accounts.copilot.modelMappingHint') }}
+          </p>
+        </div>
+
+        <div v-if="copilotModelMappings.length > 0" class="mb-3 space-y-2">
+          <div
+            v-for="(mapping, index) in copilotModelMappings"
+            :key="getCopilotModelMappingKey(mapping)"
+            class="flex items-center gap-2"
+          >
+            <input
+              v-model="mapping.from"
+              type="text"
+              class="input flex-1"
+              :placeholder="t('admin.accounts.requestModel')"
+            />
+            <svg class="h-4 w-4 flex-shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+            </svg>
+            <input
+              v-model="mapping.to"
+              type="text"
+              class="input flex-1"
+              :placeholder="t('admin.accounts.actualModel')"
+            />
+            <button
+              type="button"
+              @click="removeCopilotModelMapping(index)"
+              class="rounded-lg p-2 text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
+            >
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          @click="addCopilotModelMapping"
+          class="mb-3 w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
+        >
+          <svg class="mr-1 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+          </svg>
+          {{ t('admin.accounts.addMapping') }}
+        </button>
+
+        <div class="flex flex-wrap gap-2">
+          <button
+            v-for="preset in copilotPresetMappings"
+            :key="preset.label"
+            type="button"
+            @click="addCopilotPresetMapping(preset.from, preset.to)"
+            :class="['rounded-lg px-3 py-1 text-xs transition-colors', preset.color]"
+          >
+            + {{ preset.label }}
+          </button>
+        </div>
+      </div>
+
       <div v-if="account.type === 'upstream'" class="space-y-4">
         <div>
           <label class="input-label">{{ t('admin.accounts.upstream.baseUrl') }}</label>
@@ -1615,6 +1727,12 @@
         />
       </div>
 
+      <OllamaCloudUsageSettings
+        v-if="account?.ollama_cloud_usage?.eligible"
+        :account="account"
+        @updated="handleOllamaCloudUsageUpdated"
+      />
+
       <!-- Anthropic API Key 自动透传开关 -->
       <div
         v-if="account?.platform === 'anthropic' && account?.type === 'apikey'"
@@ -2578,7 +2696,8 @@ import type {
   CheckMixedChannelResponse,
   OpenAICompactMode,
   OpenAIResponsesMode,
-  OpenAIEndpointCapability
+  OpenAIEndpointCapability,
+  OllamaCloudUsageState
 } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
@@ -2592,6 +2711,7 @@ import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import GrokBaseUrlPresets from '@/components/account/GrokBaseUrlPresets.vue'
 import HeaderOverrideEditor from '@/components/account/HeaderOverrideEditor.vue'
+import OllamaCloudUsageSettings from '@/components/account/OllamaCloudUsageSettings.vue'
 import {
   applyAntigravityProjectID,
   applyHeaderOverride,
@@ -2599,7 +2719,6 @@ import {
   applyPlanType,
   buildPlanTypeOptions,
   readPlanType,
-  isCustomGrokBaseUrl,
   isHeaderOverrideCapable,
   splitHeaderOverridesObject,
   validateHeaderOverrideRows,
@@ -2649,17 +2768,30 @@ const authStore = useAuthStore()
 // 故隐藏代理选择器。
 const isSparkShadow = computed(() => props.account?.parent_account_id != null)
 
+const handleOllamaCloudUsageUpdated = (state: OllamaCloudUsageState) => {
+  if (props.account) emit('updated', { ...props.account, ollama_cloud_usage: state })
+}
+
 // Platform-specific hint for Base URL
 const baseUrlHint = computed(() => {
   if (!props.account) return t('admin.accounts.baseUrlHint')
   if (props.account.platform === 'openai') return t('admin.accounts.openai.baseUrlHint')
   if (props.account.platform === 'gemini') return t('admin.accounts.gemini.baseUrlHint')
   if (props.account.platform === 'grok') return ''
+  if (props.account.platform === 'copilot') return t('admin.accounts.copilot.baseUrlHint')
   return t('admin.accounts.baseUrlHint')
 })
 
 const antigravityPresetMappings = computed(() => getPresetMappingsByPlatform('antigravity'))
 const bedrockPresets = computed(() => getPresetMappingsByPlatform('bedrock'))
+
+const copilotPresetMappings = computed(() => [
+  { label: 'Sonnet 4.5', from: 'claude-sonnet-4-5', to: 'claude-sonnet-4.5', color: 'bg-purple-100 text-purple-700 hover:bg-purple-200 dark:bg-purple-900/30 dark:text-purple-400 dark:hover:bg-purple-800/40' },
+  { label: 'Sonnet 4.6', from: 'claude-sonnet-4-6', to: 'claude-sonnet-4.6', color: 'bg-purple-100 text-purple-700 hover:bg-purple-200 dark:bg-purple-900/30 dark:text-purple-400 dark:hover:bg-purple-800/40' },
+  { label: 'Opus 4.5', from: 'claude-opus-4-5', to: 'claude-opus-4.5', color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400 dark:hover:bg-indigo-800/40' },
+  { label: 'Opus 4.6', from: 'claude-opus-4-6', to: 'claude-opus-4.6', color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400 dark:hover:bg-indigo-800/40' },
+  { label: 'Haiku 4.5', from: 'claude-haiku-4-5', to: 'claude-haiku-4.5', color: 'bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-800/40' },
+])
 
 // Model mapping type
 interface ModelMapping {
@@ -2692,6 +2824,7 @@ const isBedrockAPIKeyMode = computed(() =>
   props.account?.type === 'bedrock' &&
   (props.account?.credentials as Record<string, unknown>)?.auth_mode === 'apikey'
 )
+const editGithubToken = ref('')
 const modelMappings = ref<ModelMapping[]>([])
 const openAICompactModelMappings = ref<ModelMapping[]>([])
 const modelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
@@ -2699,6 +2832,7 @@ const allowedModels = ref<string[]>([])
 const DEFAULT_POOL_MODE_RETRY_COUNT = 3
 const MAX_POOL_MODE_RETRY_COUNT = 10
 const DEFAULT_POOL_MODE_RETRY_STATUS_CODES = [401, 403, 429]
+const GROK_CLIENT_TOOL_CACHE_EXTRA_KEY = 'grok_client_tool_cache_enabled'
 const poolModeEnabled = ref(false)
 const poolModeRetryCount = ref(DEFAULT_POOL_MODE_RETRY_COUNT)
 const poolModeRetryStatusCodesInput = ref('')
@@ -2747,6 +2881,9 @@ const headerOverrideCapable = computed(
 // Grok OAuth 自定义上游地址（仅转发端点；OAuth 授权/令牌刷新不受影响）
 const grokOAuthCustomBaseUrlEnabled = ref(false)
 const grokOAuthBaseUrl = ref('')
+// Grok Free OAuth accounts use client-tool prompt caching by default. Keep an
+// explicit false in the account extra as the opt-out signal.
+const grokClientToolCacheEnabled = ref(true)
 
 const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(false)
@@ -2762,11 +2899,13 @@ const antigravityModelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist'
 const antigravityWhitelistModels = ref<string[]>([])
 const antigravityModelMappings = ref<ModelMapping[]>([])
 const isSyncingAntigravityUpstream = ref(false)
+const copilotModelMappings = ref<ModelMapping[]>([])
 const tempUnschedEnabled = ref(false)
 const tempUnschedRules = ref<TempUnschedRuleForm[]>([])
 const getModelMappingKey = createStableObjectKeyResolver<ModelMapping>('edit-model-mapping')
 const getOpenAICompactModelMappingKey = createStableObjectKeyResolver<ModelMapping>('edit-openai-compact-model-mapping')
 const getAntigravityModelMappingKey = createStableObjectKeyResolver<ModelMapping>('edit-antigravity-model-mapping')
+const getCopilotModelMappingKey = createStableObjectKeyResolver<ModelMapping>('edit-copilot-model-mapping')
 const getTempUnschedRuleKey = createStableObjectKeyResolver<TempUnschedRuleForm>('edit-temp-unsched-rule')
 
 const showMixedChannelWarning = ref(false)
@@ -3099,6 +3238,7 @@ const defaultBaseUrl = computed(() => {
   if (props.account?.platform === 'openai') return 'https://api.openai.com'
   if (props.account?.platform === 'gemini') return 'https://generativelanguage.googleapis.com'
   if (props.account?.platform === 'grok') return 'https://api.x.ai/v1'
+  if (props.account?.platform === 'copilot') return 'https://api.individual.githubcopilot.com'
   return 'https://api.anthropic.com'
 })
 
@@ -3399,29 +3539,32 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     )
   }
 
-  // Load Grok OAuth custom upstream URL state（存储的官方地址视同未定制）
-  grokOAuthCustomBaseUrlEnabled.value = false
-  grokOAuthBaseUrl.value = ''
-  if (newAccount.platform === 'grok' && newAccount.type === 'oauth' && newAccount.credentials) {
-    const grokCreds = newAccount.credentials as Record<string, unknown>
-    if (isCustomGrokBaseUrl(grokCreds.base_url)) {
-      grokOAuthCustomBaseUrlEnabled.value = true
-      grokOAuthBaseUrl.value = (grokCreds.base_url as string).trim()
-    }
-  }
-
   // Initialize API Key fields for apikey type
   if (newAccount.type === 'apikey' && newAccount.credentials) {
     const credentials = newAccount.credentials as Record<string, unknown>
-    const platformDefaultUrl =
-      newAccount.platform === 'openai'
-        ? 'https://api.openai.com'
-        : newAccount.platform === 'gemini'
-          ? 'https://generativelanguage.googleapis.com'
-          : newAccount.platform === 'grok'
-            ? 'https://api.x.ai/v1'
-            : 'https://api.anthropic.com'
-    editBaseUrl.value = (credentials.base_url as string) || platformDefaultUrl
+
+    // Copilot uses github_token instead of api_key
+    if (newAccount.platform === 'copilot') {
+      editBaseUrl.value = (credentials.base_url as string) || 'https://api.individual.githubcopilot.com'
+      editGithubToken.value = '' // never show existing token
+      // Load copilot model mapping
+      const rawCopilotMapping = credentials.model_mapping as Record<string, string> | undefined
+      if (rawCopilotMapping && typeof rawCopilotMapping === 'object') {
+        copilotModelMappings.value = Object.entries(rawCopilotMapping).map(([from, to]) => ({ from, to }))
+      } else {
+        copilotModelMappings.value = []
+      }
+    } else {
+      const platformDefaultUrl =
+        newAccount.platform === 'openai' || newAccount.platform === 'sora'
+          ? 'https://api.openai.com'
+          : newAccount.platform === 'gemini'
+            ? 'https://generativelanguage.googleapis.com'
+            : newAccount.platform === 'grok'
+              ? 'https://api.x.ai/v1'
+              : 'https://api.anthropic.com'
+      editBaseUrl.value = (credentials.base_url as string) || platformDefaultUrl
+    }
 
     // Load model mappings and detect mode
     loadModelRestrictionFromMapping(credentials.model_mapping as Record<string, unknown> | undefined)
@@ -3485,13 +3628,15 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     loadModelRestrictionFromMapping(credentials.model_mapping as Record<string, unknown> | undefined)
   } else {
     const platformDefaultUrl =
-      newAccount.platform === 'openai'
+      newAccount.platform === 'openai' || newAccount.platform === 'sora'
         ? 'https://api.openai.com'
         : newAccount.platform === 'gemini'
           ? 'https://generativelanguage.googleapis.com'
           : newAccount.platform === 'grok'
             ? 'https://api.x.ai/v1'
-            : 'https://api.anthropic.com'
+            : newAccount.platform === 'copilot'
+              ? 'https://api.individual.githubcopilot.com'
+              : 'https://api.anthropic.com'
     editBaseUrl.value = platformDefaultUrl
 
     // Load model mappings for OpenAI/Grok OAuth accounts
@@ -3502,6 +3647,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       modelRestrictionMode.value = 'whitelist'
       modelMappings.value = []
       allowedModels.value = []
+      copilotModelMappings.value = []
     }
     poolModeEnabled.value = false
     poolModeRetryCount.value = DEFAULT_POOL_MODE_RETRY_COUNT
@@ -3510,6 +3656,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     selectedErrorCodes.value = []
   }
   editApiKey.value = ''
+  editGithubToken.value = ''
 }
 
 async function loadTLSProfiles() {
@@ -3610,6 +3757,23 @@ const syncAntigravityUpstreamModels = async () => {
   } finally {
     isSyncingAntigravityUpstream.value = false
   }
+}
+
+const addCopilotModelMapping = () => {
+  copilotModelMappings.value.push({ from: '', to: '' })
+}
+
+const removeCopilotModelMapping = (index: number) => {
+  copilotModelMappings.value.splice(index, 1)
+}
+
+const addCopilotPresetMapping = (from: string, to: string) => {
+  const exists = copilotModelMappings.value.some((m) => m.from === from)
+  if (exists) {
+    appStore.showInfo(t('admin.accounts.mappingExists', { model: from }))
+    return
+  }
+  copilotModelMappings.value.push({ from, to })
 }
 
 // Error code toggle helper
@@ -4011,7 +4175,31 @@ const handleSubmit = async () => {
     if (props.account.type === 'apikey') {
       const currentCredentials = (props.account.credentials as Record<string, unknown>) || {}
       const newBaseUrl = editBaseUrl.value.trim() || defaultBaseUrl.value
-      const shouldApplyModelMapping = !(props.account.platform === 'openai' && openaiPassthroughEnabled.value)
+
+      // Copilot uses github_token instead of api_key
+      if (props.account.platform === 'copilot') {
+        const newCredentials: Record<string, unknown> = {
+          base_url: newBaseUrl
+        }
+        if (editGithubToken.value.trim()) {
+          newCredentials.github_token = editGithubToken.value.trim()
+        } else if (currentCredentials.github_token) {
+          newCredentials.github_token = currentCredentials.github_token
+        } else {
+          appStore.showError(t('admin.accounts.copilot.pleaseEnterToken'))
+          return
+        }
+        // Save copilot model mapping if configured
+        const copilotMapping = buildModelMappingObject('mapping', [], copilotModelMappings.value)
+        if (copilotMapping) {
+          newCredentials.model_mapping = copilotMapping
+        }
+        applyInterceptWarmup(newCredentials, interceptWarmupRequests.value, 'edit')
+        if (!applyTempUnschedConfig(newCredentials)) {
+          return
+        }
+        updatePayload.credentials = newCredentials
+      } else {
 
       // Always update credentials for apikey type to handle model mapping changes
       const newCredentials: Record<string, unknown> = {
@@ -4034,6 +4222,7 @@ const handleSubmit = async () => {
       }
 
       // Add model mapping if configured（OpenAI 开启自动透传时保留现有映射，不再编辑）
+      const shouldApplyModelMapping = !openaiPassthroughEnabled.value
       if (shouldApplyModelMapping) {
         const modelMapping = buildModelRestrictionMapping()
         if (modelMapping) {
@@ -4091,13 +4280,43 @@ const handleSubmit = async () => {
         applyHeaderOverride(newCredentials, headerOverrideEnabled.value, headerOverrideRows.value, 'edit')
       }
 
-      // Add intercept warmup requests setting
-      applyInterceptWarmup(newCredentials, interceptWarmupRequests.value, 'edit')
-      if (!applyTempUnschedConfig(newCredentials)) {
-        return
-      }
+        // Handle API key
+        if (editApiKey.value.trim()) {
+          // User provided a new API key
+          newCredentials.api_key = editApiKey.value.trim()
+        } else if (currentCredentials.api_key) {
+          // Preserve existing api_key
+          newCredentials.api_key = currentCredentials.api_key
+        } else {
+          appStore.showError(t('admin.accounts.apiKeyIsRequired'))
+          return
+        }
 
-      updatePayload.credentials = newCredentials
+        // Add model mapping if configured（OpenAI 开启自动透传时保留现有映射，不再编辑）
+        const shouldApplyModelMapping2 = !openaiPassthroughEnabled.value
+        if (shouldApplyModelMapping2) {
+          const modelMapping = buildModelMappingObject(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
+          if (modelMapping) {
+            newCredentials.model_mapping = modelMapping
+          }
+        } else if (currentCredentials.model_mapping) {
+          newCredentials.model_mapping = currentCredentials.model_mapping
+        }
+
+        // Add custom error codes if enabled
+        if (customErrorCodesEnabled.value) {
+          newCredentials.custom_error_codes_enabled = true
+          newCredentials.custom_error_codes = [...selectedErrorCodes.value]
+        }
+
+        // Add intercept warmup requests setting
+        applyInterceptWarmup(newCredentials, interceptWarmupRequests.value, 'edit')
+        if (!applyTempUnschedConfig(newCredentials)) {
+          return
+        }
+
+        updatePayload.credentials = newCredentials
+      }
     } else if (props.account.type === 'upstream') {
       const currentCredentials = (props.account.credentials as Record<string, unknown>) || {}
       const newCredentials: Record<string, unknown> = { ...currentCredentials }
@@ -4288,6 +4507,14 @@ const handleSubmit = async () => {
       applyHeaderOverride(newCredentials, headerOverrideEnabled.value, headerOverrideRows.value, 'edit')
 
       updatePayload.credentials = newCredentials
+
+      const newExtra: Record<string, unknown> = {
+        ...((props.account.extra as Record<string, unknown>) || {})
+      }
+      // Persist both states so a disabled account remains opted out when the
+      // backend applies the default-enabled policy to missing values.
+      newExtra[GROK_CLIENT_TOOL_CACHE_EXTRA_KEY] = grokClientToolCacheEnabled.value
+      updatePayload.extra = newExtra
     }
 
     // OpenAI: 手动覆盖订阅档位 plan_type（Plus/Pro/Free）。仅 OAuth 非影子账号：
