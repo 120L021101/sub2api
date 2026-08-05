@@ -39,6 +39,10 @@ type StreamConverter interface {
 	To() Protocol
 	// ConvertChunk 输入一条上游 SSE 的 data 载荷（不含 "data: " 前缀），
 	// 返回 0 到 N 条下游事件。返回空切片是合法且常见的情况。
+	//
+	// 返回事件中 Data 的底层数组归调用方所有：实现不得在后续的 ConvertChunk
+	// 或 Flush 调用中复用它。否则调用方一旦先攒事件再统一编码，早先的事件会被
+	// 静默覆写成错帧，而这类错误既不 panic 也不返回 error。
 	ConvertChunk(src []byte) ([]SSEEvent, error)
 	// Flush 在上游流结束时调用，返回残留的收尾事件。
 	// 允许重复调用，第二次及以后返回空切片。

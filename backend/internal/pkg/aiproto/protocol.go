@@ -5,6 +5,9 @@ import (
 	"strings"
 )
 
+// Protocol 是本包支持的协议标识。
+type Protocol string
+
 // 协议标识。用于 registry 查找与错误信息。
 const (
 	// ProtocolOpenAI 表示 OpenAI Chat Completions 协议。
@@ -14,9 +17,6 @@ const (
 	// ProtocolCopilot 表示 GitHub Copilot 私有方言（OpenAI Chat Completions 的超集）。
 	ProtocolCopilot Protocol = "copilot"
 )
-
-// Protocol 是本包支持的协议标识。
-type Protocol string
 
 // String 实现 fmt.Stringer。
 func (p Protocol) String() string { return string(p) }
@@ -61,13 +61,18 @@ type Logger interface {
 // Options 携带转换过程需要的外部上下文。所有字段均可为零值，
 // 此时按各字段注释描述的保守默认行为处理。
 //
-// Options 可以为 nil，本包的所有方法都对 nil 接收器安全。
+// Options 指针可以为 nil：本包定义在 *Options 上的所有方法都对 nil 接收器安全。
+// 注意这个保证只覆盖方法，不覆盖裸字段访问——因此包内读取选项必须走访问器方法，
+// 禁止写 opt.SomeField。新增字段时必须同时新增对应的访问器。
 type Options struct {
 	// Model 是本次请求的模型 ID（客户端视角的名字）。
 	// 影响 Anthropic → OpenAI 转换中与 Claude 相关的 thinking 过滤规则。
 	Model string
 
 	// Logger 接收降级与丢弃事件。为 nil 时静默。
+	//
+	// 必须是真正的 nil 或可用实例，不能是 typed-nil（例如值为 nil 的
+	// *slog.Logger 装进接口）：那种情况下接口值非 nil，调用会 panic。
 	Logger Logger
 
 	// SupportPDF 表示上游是否接受 file content part（PDF/文档）。
@@ -156,7 +161,11 @@ const (
 type SSEEvent struct {
 	// Event 是 SSE 的事件名。为空表示不写 event: 行。
 	Event string
-	// Data 是已序列化的 JSON 报文。Done 为 true 时忽略该字段。
+	// Data 是已序列化的单行 JSON 报文。Done 为 true 时忽略该字段。
+	//
+	// 不变量：不得含裸 \n 或 \r。SSE 以换行分帧，裸换行会把一帧劈成两行，
+	// 第二行缺少 data: 前缀，下游解析器会拿到残缺 JSON。encoding/json
+	// 的非 Indent 模式天然满足该不变量（字符串内的换行被转义）。
 	Data []byte
 	// Done 为 true 表示这是 data: [DONE] 终止帧。
 	Done bool
@@ -181,15 +190,19 @@ func (e SSEEvent) AppendTo(dst []byte) []byte {
 	return append(dst, '\n', '\n')
 }
 
-// Encode 返回 e 的 SSE 线格式字节。
+// Encode 返回 e 的 SSE 线格式字节，每次调用分配一次。
+//
+// 流式热路径应改用 AppendTo 复用调用方自己的缓冲区；Encode 只适合单帧场景与测试。
 func (e SSEEvent) Encode() []byte {
-	// 预估容量：event 行 + data 行 + 两个换行。
-	n := len(sseDataPrefix) + len(e.Data) + 2
+	// 容量预估必须与 AppendTo 的分支保持同构，否则会过量分配或触发二次扩容。
+	n := len(sseDataPrefix) + 2
 	if e.Event != "" {
 		n += len(sseEventPrefix) + len(e.Event) + 1
 	}
 	if e.Done {
 		n += len(sseDoneData)
+	} else {
+		n += len(e.Data)
 	}
 	return e.AppendTo(make([]byte, 0, n))
 }

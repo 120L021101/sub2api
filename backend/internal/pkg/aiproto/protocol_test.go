@@ -111,12 +111,28 @@ func TestSSEEventAppendToReusesBuffer(t *testing.T) {
 	}
 }
 
-// TestSSEEventEncodeCapacity 确认 Encode 预估的容量足够，不触发二次扩容。
+// TestSSEEventEncodeCapacity 确认 Encode 的容量预估与 AppendTo 的分支同构：
+// 既不低估（触发二次扩容）也不高估（浪费内存）。Done 分支尤其容易失配，
+// 因为 AppendTo 在 Done 时忽略 Data 而容量计算容易忘记跳过。
 func TestSSEEventEncodeCapacity(t *testing.T) {
-	e := SSEEvent{Event: "content_block_delta", Data: bytes.Repeat([]byte("x"), 512)}
-	out := e.Encode()
-	if cap(out) != len(out) {
-		t.Fatalf("Encode() cap = %d, len = %d; capacity estimate should be exact", cap(out), len(out))
+	longData := bytes.Repeat([]byte("x"), 512)
+	tests := []struct {
+		name  string
+		event SSEEvent
+	}{
+		{name: "plain data", event: SSEEvent{Data: longData}},
+		{name: "with event line", event: SSEEvent{Event: "content_block_delta", Data: longData}},
+		{name: "done frame with stale data", event: SSEEvent{Data: longData, Done: true}},
+		{name: "done frame without data", event: DoneEvent()},
+		{name: "empty", event: SSEEvent{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := tt.event.Encode()
+			if cap(out) != len(out) {
+				t.Fatalf("Encode() cap = %d, len = %d; capacity estimate must be exact", cap(out), len(out))
+			}
+		})
 	}
 }
 

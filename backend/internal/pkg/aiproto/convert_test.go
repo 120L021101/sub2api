@@ -68,11 +68,25 @@ func TestRegistryErrorMentionsProtocols(t *testing.T) {
 	}
 }
 
-func TestRegisterAndLookup(t *testing.T) {
-	c := fakeConv{from: fakeProtoA, to: fakeProtoB}
+// registerForTest 把 c 注册进三个 registry，并在测试结束时移除。
+//
+// 必须清理：registry 是包级全局状态，测试注册后不清理会让 go test -count=2
+// 在第二轮撞上重复注册 panic，整个测试二进制崩溃。
+func registerForTest(t *testing.T, c fakeConv) {
+	t.Helper()
 	registerRequestConv(c)
 	registerResponseConv(c)
-	registerStreamConv(fakeProtoA, fakeProtoB, func(*Options) StreamConverter { return c })
+	registerStreamConv(c.from, c.to, func(*Options) StreamConverter { return c })
+	t.Cleanup(func() {
+		k := convKey{c.from, c.to}
+		delete(requestConvs, k)
+		delete(responseConvs, k)
+		delete(streamConvs, k)
+	})
+}
+
+func TestRegisterAndLookup(t *testing.T) {
+	registerForTest(t, fakeConv{from: fakeProtoA, to: fakeProtoB})
 
 	rc, err := RequestConv(fakeProtoA, fakeProtoB)
 	if err != nil {
@@ -100,6 +114,25 @@ func TestRegisterAndLookup(t *testing.T) {
 	}
 }
 
+// TestRegisterCleanupRemovesEntries 固化 registerForTest 的清理契约本身，
+// 否则 -count>1 崩溃这类问题只会在偶然多跑一轮时才暴露。
+func TestRegisterCleanupRemovesEntries(t *testing.T) {
+	const (
+		tmpA Protocol = "test-cleanup-a"
+		tmpB Protocol = "test-cleanup-b"
+	)
+	t.Run("register", func(t *testing.T) {
+		registerForTest(t, fakeConv{from: tmpA, to: tmpB})
+		if _, err := RequestConv(tmpA, tmpB); err != nil {
+			t.Fatalf("RequestConv error: %v", err)
+		}
+	})
+	// 子测试结束后 t.Cleanup 已执行，registry 必须回到未注册状态。
+	if _, err := RequestConv(tmpA, tmpB); !errors.Is(err, ErrUnsupportedConversion) {
+		t.Errorf("after cleanup error = %v, want ErrUnsupportedConversion", err)
+	}
+}
+
 // TestRegisterDuplicatePanics 固化「重复注册是初始化期不变量违规」这一约定：
 // 必须立即 panic，而不是静默覆盖导致运行期走到错误的转换器。
 func TestRegisterDuplicatePanics(t *testing.T) {
@@ -108,23 +141,35 @@ func TestRegisterDuplicatePanics(t *testing.T) {
 		dupB Protocol = "test-dup-b"
 	)
 	c := fakeConv{from: dupA, to: dupB}
+	k := convKey{dupA, dupB}
 
 	tests := []struct {
 		name     string
 		register func()
+		cleanup  func()
 	}{
-		{name: "request", register: func() { registerRequestConv(c) }},
-		{name: "response", register: func() { registerResponseConv(c) }},
+		{
+			name:     "request",
+			register: func() { registerRequestConv(c) },
+			cleanup:  func() { delete(requestConvs, k) },
+		},
+		{
+			name:     "response",
+			register: func() { registerResponseConv(c) },
+			cleanup:  func() { delete(responseConvs, k) },
+		},
 		{
 			name: "stream",
 			register: func() {
 				registerStreamConv(dupA, dupB, func(*Options) StreamConverter { return c })
 			},
+			cleanup: func() { delete(streamConvs, k) },
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.register() // 首次注册成功
+			t.Cleanup(tt.cleanup)
 			defer func() {
 				if recover() == nil {
 					t.Error("duplicate registration did not panic")
